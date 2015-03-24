@@ -465,7 +465,7 @@ createwindow(WebKitWebView  *v, WebKitWebFrame *f, Client *c) {
 static gboolean
 decidedownload(WebKitWebView *v, WebKitWebFrame *f, WebKitNetworkRequest *r,
 		gchar *m,  WebKitWebPolicyDecision *p, Client *c) {
-	if(!webkit_web_view_can_show_mime_type(v, m)) {
+	if(!webkit_web_view_can_show_mime_type(v, m) && !webkit_web_frame_get_parent(f)) {
 		webkit_web_policy_decision_download(p);
 		return TRUE;
 	}
