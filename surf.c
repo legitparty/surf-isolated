@@ -176,10 +176,10 @@ static void linkhover(WebKitWebView *v, const char* t, const char* l,
 		Client *c);
 static void loadstatuschange(WebKitWebView *view, GParamSpec *pspec,
 		Client *c);
-static void loaduri(Client *c, const Arg *arg);
+static void loaduri(Client *c, const Arg *arg, gboolean explicitnavigation);
 static void navigate(Client *c, const Arg *arg);
 static Client *newclient(void);
-static void newwindow(Client *c, const Arg *arg, gboolean noembed);
+static void newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigation);
 static void pasteuri(GtkClipboard *clipboard, const char *text, gpointer d);
 static gboolean contextmenu(WebKitWebView *view, GtkWidget *menu,
 		WebKitHitTestResult *target, gboolean keyboard, Client *c);
@@ -502,7 +502,7 @@ decidewindow(WebKitWebView *view, WebKitWebFrame *f, WebKitNetworkRequest *r,
 			WEBKIT_WEB_NAVIGATION_REASON_LINK_CLICKED) {
 		webkit_web_policy_decision_ignore(p);
 		arg.v = (void *)webkit_network_request_get_uri(r);
-		newwindow(NULL, &arg, 0);
+		newwindow(NULL, &arg, 0, 0);
 		return TRUE;
 	}
 	return FALSE;
@@ -766,7 +766,7 @@ loadstatuschange(WebKitWebView *view, GParamSpec *pspec, Client *c) {
 }
 
 static void
-loaduri(Client *c, const Arg *arg) {
+loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
 	char *u = NULL, *rp;
 	const char *uri = (char *)arg->v;
 	Arg a = { .b = FALSE };
@@ -1039,7 +1039,7 @@ newclient(void) {
 }
 
 static void
-newwindow(Client *c, const Arg *arg, gboolean noembed) {
+newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigation) {
 	guint i = 0;
 	const char *cmd[18], *uri;
 	const Arg a = { .v = (void *)cmd };
@@ -1131,7 +1131,7 @@ static void
 pasteuri(GtkClipboard *clipboard, const char *text, gpointer d) {
 	Arg arg = {.v = text };
 	if(text != NULL)
-		loaduri((Client *) d, &arg);
+		loaduri((Client *) d, &arg, 1);
 }
 
 static void
@@ -1155,7 +1155,7 @@ processx(GdkXEvent *e, GdkEvent *event, gpointer d) {
 				return GDK_FILTER_REMOVE;
 			} else if(ev->atom == atoms[AtomGo]) {
 				arg.v = getatom(c, AtomGo);
-				loaduri(c, &arg);
+				loaduri(c, &arg, 1);
 
 				return GDK_FILTER_REMOVE;
 			}
@@ -1172,12 +1172,12 @@ progresschange(WebKitWebView *view, GParamSpec *pspec, Client *c) {
 
 static void
 linkopen(Client *c, const Arg *arg) {
-	newwindow(NULL, arg, 1);
+	newwindow(NULL, arg, 1, 0);
 }
 
 static void
 linkopenembed(Client *c, const Arg *arg) {
-	newwindow(NULL, arg, 0);
+	newwindow(NULL, arg, 0, 0);
 }
 
 static void
@@ -1774,7 +1774,7 @@ main(int argc, char *argv[]) {
 	setup();
 	c = newclient();
 	if(arg.v) {
-		loaduri(clients, &arg);
+		loaduri(clients, &arg, 0);
 	} else {
 		updatetitle(c);
 	}
