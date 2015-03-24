@@ -924,6 +924,9 @@ newclient(void) {
 
 	settings = webkit_web_view_get_settings(c->view);
 	g_object_set(G_OBJECT(settings), "html5-local-storage-database-path", dbfolder, NULL);
+	g_object_set(G_OBJECT(settings), "enable-running-of-insecure-content", 0, NULL);
+	g_object_set(G_OBJECT(settings), "enable-offline-web-application-cache", 0, NULL);
+	g_object_set(G_OBJECT(settings), "enable-dns-prefetching", 0, NULL);
 
 	if(!(ua = getenv("SURF_USERAGENT")))
 		ua = useragent;
