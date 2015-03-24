@@ -50,10 +50,15 @@ static Bool allowgeolocation      = TRUE;
 /* DOWNLOAD(URI, referer) */
 #define DOWNLOAD(d, r) { \
 	.v = (char *[]){ "/bin/sh", "-c", \
-		"st -e /bin/sh -c \"curl -L -J -O --user-agent '$1'" \
-		" --referer '$2' -b $3 -c $3 '$0';" \
-		" sleep 5;\"", \
-		d, useragent, r, cookiefile, NULL \
+		"D=\"`printf \"${PWD}\n${HOME}\n${HOME}/Downloads\n\" | dmenu -p 'Save into' -l 3`\" &&" \
+		"mkdir -p \"${D}\" && cd \"${D}\" &&" \
+		"N=\"`basename \"$0\"`\" &&" \
+		"F=\"`echo \"${N}\" | dmenu -p 'Save as'`\" &&" \
+		"st -e /bin/sh -c \"" \
+			"curl -L -J -o '$F' --user-agent '$1' --referer '$2' -b $3 -c $3 '$0';" \
+			"echo 'Press Enter to close window...'; read y" \
+		"\"", \
+		d, (useragent ? useragent : ""), r, cookiefile, NULL \
 	} \
 }
 
