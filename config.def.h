@@ -5,6 +5,7 @@ static char *useragent      = "Mozilla/5.0 (X11; U; Unix; en-US) "
 static char *scriptfile     = "~/.surf/script.js";
 static char *styledir       = "~/.surf/styles/";
 static char *cachefolder    = "~/.surf/cache/";
+static char *dbfolder       = "~/.surf/databases/";
 
 static Bool kioskmode       = FALSE; /* Ignore shortcuts */
 static Bool showindicators  = TRUE;  /* Show indicators in window title */

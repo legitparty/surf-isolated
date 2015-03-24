@@ -923,6 +923,8 @@ newclient(void) {
 	runscript(frame);
 
 	settings = webkit_web_view_get_settings(c->view);
+	g_object_set(G_OBJECT(settings), "html5-local-storage-database-path", dbfolder, NULL);
+
 	if(!(ua = getenv("SURF_USERAGENT")))
 		ua = useragent;
 	g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
@@ -1224,6 +1226,7 @@ setup(void) {
 	cookiefile = buildpath(cookiefile);
 	scriptfile = buildpath(scriptfile);
 	cachefolder = buildpath(cachefolder);
+	dbfolder = buildpath(dbfolder);
 	styledir = buildpath(styledir);
 	if(stylefile == NULL) {
 		for(i = 0; i < LENGTH(styles); i++) {
