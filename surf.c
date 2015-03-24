@@ -1231,6 +1231,7 @@ setatom(Client *c, int a, const char *v) {
 	XChangeProperty(dpy, GDK_WINDOW_XID(GTK_WIDGET(c->win)->window),
 			atoms[a], XA_STRING, 8, PropModeReplace,
 			(unsigned char *)v, strlen(v) + 1);
+	XSync(dpy, False);
 }
 
 static void
