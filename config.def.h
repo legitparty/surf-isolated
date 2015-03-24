@@ -35,11 +35,15 @@ static Bool loadimages            = TRUE;
 static Bool hidebackground        = FALSE;
 static Bool allowgeolocation      = TRUE;
 
-#define SETPROP(p, q) { \
+#define PROMPT_GO    "Go to"
+#define PROMPT_FIND  "Find"
+#define PROMPT_FIND2 "/"
+
+#define SETPROP(p, q, prompt) { \
 	.v = (char *[]){ "/bin/sh", "-c", \
-		"prop=\"`xprop -id $2 $0 | cut -d '\"' -f 2 | xargs -0 printf %b | dmenu`\" &&" \
+		"prop=\"`xprop -id $2 $0 | cut -d '\"' -f 2 | xargs -0 printf %b | dmenu -p \"$3\"`\" &&" \
 		"xprop -id $2 -f $1 8s -set $1 \"$prop\"", \
-		p, q, winid, NULL \
+		p, q, winid, prompt, NULL \
 	} \
 }
 
@@ -110,9 +114,9 @@ static Key keys[] = {
     { MODKEY,               GDK_o,      source,     { 0 } },
     { MODKEY|GDK_SHIFT_MASK,GDK_o,      inspector,  { 0 } },
 
-    { MODKEY,               GDK_g,      spawn,      SETPROP("_SURF_URI", "_SURF_GO") },
-    { MODKEY,               GDK_f,      spawn,      SETPROP("_SURF_FIND", "_SURF_FIND") },
-    { MODKEY,               GDK_slash,  spawn,      SETPROP("_SURF_FIND", "_SURF_FIND") },
+    { MODKEY,               GDK_g,      spawn,      SETPROP("_SURF_URI", "_SURF_GO", PROMPT_GO) },
+    { MODKEY,               GDK_f,      spawn,      SETPROP("_SURF_FIND", "_SURF_FIND", PROMPT_FIND) },
+    { MODKEY,               GDK_slash,  spawn,      SETPROP("_SURF_FIND", "_SURF_FIND", PROMPT_FIND2) },
 
     { MODKEY,               GDK_n,      find,       { .b = TRUE } },
     { MODKEY|GDK_SHIFT_MASK,GDK_n,      find,       { .b = FALSE } },
