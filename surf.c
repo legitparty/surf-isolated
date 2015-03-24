@@ -605,7 +605,7 @@ geturi(Client *c) {
 	char *uri;
 
 	if(!(uri = (char *)webkit_web_view_get_uri(c->view)))
-		uri = "about:blank";
+		uri = "";
 	return uri;
 }
 
