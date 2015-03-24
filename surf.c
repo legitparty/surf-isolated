@@ -108,6 +108,8 @@ static GTlsDatabase *tlsdb;
 static int policysel = 0;
 static char *stylefile = NULL;
 static SoupCache *diskcache = NULL;
+static gboolean hasloaded = false;
+static gboolean hasvisual = false;
 
 static void acceptlanguagescramble();
 static void addaccelgroup(Client *c);
@@ -735,6 +737,9 @@ loadstatuschange(WebKitWebView *view, GParamSpec *pspec, Client *c) {
 	char *uri;
 
 	switch(webkit_web_view_get_load_status (c->view)) {
+	case WEBKIT_LOAD_FIRST_VISUALLY_NON_EMPTY_LAYOUT:
+		hasvisual = true;
+		break;
 	case WEBKIT_LOAD_COMMITTED:
 		uri = geturi(c);
 		if(strstr(uri, "https://") == uri) {
@@ -793,6 +798,7 @@ loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
 	} else {
 		webkit_web_view_load_uri(c->view, u);
 		c->progress = 0;
+		hasloaded = true;
 		c->title = copystr(&c->title, u);
 		updatetitle(c);
 	}
@@ -820,6 +826,7 @@ newclient(void) {
 
 	c->title = NULL;
 	c->progress = 100;
+	hasloaded = false;
 
 	/* Window */
 	if(embed) {
@@ -1077,6 +1084,12 @@ newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigati
 		cmd[i++] = uri;
 	cmd[i++] = NULL;
 	spawn(NULL, &a);
+	if (!hasvisual) {
+		if(dpy)
+			close(ConnectionNumber(dpy));
+
+		exit(0);
+	}
 }
 
 static gboolean
