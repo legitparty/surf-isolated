@@ -135,6 +135,9 @@ static WebKitWebView *createwindow(WebKitWebView *v, WebKitWebFrame *f,
 static gboolean decidedownload(WebKitWebView *v, WebKitWebFrame *f,
 		WebKitNetworkRequest *r, gchar *m,  WebKitWebPolicyDecision *p,
 		Client *c);
+static gboolean decidenavigation(WebKitWebView *v, WebKitWebFrame *f,
+		WebKitNetworkRequest *r, WebKitWebNavigationAction *n,
+		WebKitWebPolicyDecision *p, Client *c);
 static gboolean decidewindow(WebKitWebView *v, WebKitWebFrame *f,
 		WebKitNetworkRequest *r, WebKitWebNavigationAction *n,
 		WebKitWebPolicyDecision *p, Client *c);
@@ -469,6 +472,13 @@ decidedownload(WebKitWebView *v, WebKitWebFrame *f, WebKitNetworkRequest *r,
 		webkit_web_policy_decision_download(p);
 		return TRUE;
 	}
+	return FALSE;
+}
+
+static gboolean
+decidenavigation(WebKitWebView *view, WebKitWebFrame *f, WebKitNetworkRequest *r,
+		WebKitWebNavigationAction *n, WebKitWebPolicyDecision *p,
+		Client *c) {
 	return FALSE;
 }
 
@@ -857,6 +867,9 @@ newclient(void) {
 	g_signal_connect(G_OBJECT(c->view),
 			"new-window-policy-decision-requested",
 			G_CALLBACK(decidewindow), c);
+	g_signal_connect(G_OBJECT(c->view),
+			"navigation-policy-decision-requested",
+			G_CALLBACK(decidenavigation), c);
 	g_signal_connect(G_OBJECT(c->view),
 			"mime-type-policy-decision-requested",
 			G_CALLBACK(decidedownload), c);
