@@ -1,7 +1,5 @@
 /* modifier 0 means no modifier */
-static char *useragent      = "Mozilla/5.0 (X11; U; Unix; en-US) "
-	"AppleWebKit/537.15 (KHTML, like Gecko) Chrome/24.0.1295.0 "
-	"Safari/537.15 Surf/"VERSION;
+static char *useragent      = NULL;
 static char *scriptfile     = "~/.surf/script.js";
 static char *styledir       = "~/.surf/styles/";
 static char *cachefolder    = "~/.surf/cache/";

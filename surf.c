@@ -109,6 +109,7 @@ static int policysel = 0;
 static char *stylefile = NULL;
 static SoupCache *diskcache = NULL;
 
+static void acceptlanguagescramble();
 static void addaccelgroup(Client *c);
 static void beforerequest(WebKitWebView *w, WebKitWebFrame *f,
 		WebKitWebResource *r, WebKitNetworkRequest *req,
@@ -198,7 +199,11 @@ static void setup(void);
 static void sigchld(int unused);
 static void source(Client *c, const Arg *arg);
 static void spawn(Client *c, const Arg *arg);
+static gchar *strentropy();
+static gchar *strlangentropy();
+static int strrand(char *buf, int buflen);
 static void stop(Client *c, const Arg *arg);
+static void useragentscramble(WebKitWebView *view);
 static void titlechange(WebKitWebView *view, GParamSpec *pspec, Client *c);
 static void titlechangeleave(void *a, void *b, Client *c);
 static void toggle(Client *c, const Arg *arg);
@@ -479,6 +484,11 @@ static gboolean
 decidenavigation(WebKitWebView *view, WebKitWebFrame *f, WebKitNetworkRequest *r,
 		WebKitWebNavigationAction *n, WebKitWebPolicyDecision *p,
 		Client *c) {
+	if (!useragent) {
+		useragentscramble(view);
+	}
+	acceptlanguagescramble();
+
 	return FALSE;
 }
 
@@ -965,6 +975,11 @@ newclient(void) {
 	g_object_set(G_OBJECT(settings), "resizable-text-areas",
 			1, NULL);
 
+	if (!useragent) {
+		useragentscramble(c->view);
+	}
+	acceptlanguagescramble();
+
 	/*
 	 * While stupid, CSS specifies that a pixel represents 1/96 of an inch.
 	 * This ensures websites are not unusably small with a high DPI screen.
@@ -1327,6 +1342,99 @@ spawn(Client *c, const Arg *arg) {
 		perror(" failed");
 		exit(0);
 	}
+}
+
+static int
+strrand(char *buf, int buflen) {
+	int fd;
+	int received;
+
+	fd = g_open("/dev/urandom", O_RDONLY, 0);
+	if (fd == -1) {
+		return -1;
+	}
+	received = read(fd, buf, buflen);
+	if (received != buflen) {
+		return -1;
+	}
+	return g_close(fd, NULL);
+}
+
+/* return value must be freed with g_free() */
+static gchar *
+strentropy() {
+	gchar *strname = NULL;
+	char byte, randbuf[256], namebuf[256];
+	int rand_i, name_i;
+
+	if (strrand(randbuf, sizeof (randbuf)) == -1) {
+		return NULL;
+	}
+
+	name_i = 0;
+	for (rand_i = 0; rand_i < sizeof (randbuf) && name_i < sizeof (namebuf); rand_i++) {
+		byte = randbuf[rand_i];
+		if (byte >= ' ' - 5 && byte <= ' ') { /* space AND some characters below, to increase the number of spaces */
+			namebuf[name_i++] = ' ';
+		} else if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') || (byte >= '0' && byte <= '9')) {
+			namebuf[name_i++] = byte;
+		} else {
+			/* some bytes are skipped, to randomly vary the length */
+		}
+	}
+	namebuf[name_i] = '\0';
+	strname = g_strndup(namebuf, sizeof(namebuf) - 1);
+
+	return strname;
+}
+
+/* return value must be freed with g_free() */
+static gchar *
+strlangentropy() {
+	gchar *strname = NULL;
+	char randbuf[4], langbuf[6];
+
+	if (strrand(randbuf, sizeof (randbuf)) == -1) {
+		return NULL;
+	}
+
+#define randbetween(low, high, randbyte) (low + ((unsigned char) randbyte % (high - low)))
+	langbuf[0] = randbetween('a', 'z', randbuf[0]); 
+	langbuf[1] = randbetween('a', 'z', randbuf[1]);
+	langbuf[2] = '_';
+	langbuf[3] = randbetween('A', 'Z', randbuf[2]);
+	langbuf[4] = randbetween('A', 'Z', randbuf[3]);
+	langbuf[5] = '\0';
+
+	strname = g_strdup(langbuf);
+
+	return strname;
+}
+
+static void
+acceptlanguagescramble() {
+	SoupSession *s = webkit_get_default_session();
+	char *lang = getenv("LANG");
+	char *randlang1 = strlangentropy();
+	char *randlang2 = strlangentropy();
+	char *acceptlanguage;
+
+	if (strlen(lang) >= 5) {
+		acceptlanguage = g_strdup_printf("%5.5s, %s;q=0.9, %s;q=0.8", lang, randlang1, randlang2);
+		g_object_set(G_OBJECT(s), "accept-language", acceptlanguage, NULL);
+	}
+	g_free(randlang1);
+	g_free(randlang2);
+}
+
+static void
+useragentscramble(WebKitWebView *view) {
+	WebKitWebSettings *settings = webkit_web_view_get_settings(view);
+	gchar *ua = strentropy();
+	if (!ua) 
+		ua = " "; /* fallback to blank user-agent -- NULL or "" return a webkit default string that leaks information */
+	g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
+	g_free(ua);
 }
 
 static void
