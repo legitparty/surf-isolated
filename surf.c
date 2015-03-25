@@ -102,11 +102,13 @@ static GdkNativeWindow embed = 0;
 static gboolean showxid = FALSE;
 static char winid[64];
 static gboolean usingproxy = 0;
-static char togglestat[9];
+static char togglestat[10];
 static char pagestat[3];
 static GTlsDatabase *tlsdb;
 static int policysel = 0;
 static char *stylefile = NULL;
+static char *origin_uri = NULL;
+static char *referring_origin = NULL;
 static SoupCache *diskcache = NULL;
 static gboolean hasloaded = false;
 static gboolean hasvisual = false;
@@ -182,6 +184,13 @@ static void loaduri(Client *c, const Arg *arg, gboolean explicitnavigation);
 static void navigate(Client *c, const Arg *arg);
 static Client *newclient(void);
 static void newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigation);
+static int origincmp(const char *uri1, const char *uri2);
+static int originhas(const char *uri);
+static const char *origingetproto(const char *uri);
+static char *origingetfolder(const char *uri);
+static char *origingethost(const char *uri);
+static char *origingeturi(const char *uri);
+static int originmatch(const char *uri1, const char *uri2);
 static void pasteuri(GtkClipboard *clipboard, const char *text, gpointer d);
 static gboolean contextmenu(WebKitWebView *view, GtkWidget *menu,
 		WebKitHitTestResult *target, gboolean keyboard, Client *c);
@@ -487,12 +496,37 @@ static gboolean
 decidenavigation(WebKitWebView *view, WebKitWebFrame *f, WebKitNetworkRequest *r,
 		WebKitWebNavigationAction *n, WebKitWebPolicyDecision *p,
 		Client *c) {
+	const char *uri = webkit_network_request_get_uri(r);
+	Arg arg;
+
 	if (!useragent) {
 		useragentscramble(view);
 	}
 	acceptlanguagescramble();
 
-	return FALSE;
+	if (!sameoriginpolicy) {
+		/* configured to not bother isolating origins */
+		return FALSE;
+	} else if (webkit_web_frame_get_parent(f)) {
+		/* has a parent, and therefore not an origin */
+		return FALSE;
+	/* branches below operate on the origin, top-most frame */
+	} else if (uri && (uri[0] == '\0' || strcmp(uri, "about:blank") == 0)) {
+		/* nothing is really going to load */
+		return FALSE;
+	} else if (!hasloaded) {
+		/* we *are* the new window */
+		return FALSE;
+	} else if (!origin_uri || originmatch(uri, origin_uri)) {
+		/* origin matches */
+		return FALSE;
+	} else {
+		/* top-most frame, and origin differs -- isolate within a new process */
+		webkit_web_policy_decision_ignore(p);
+		arg.v = (void *) uri;
+		newwindow(NULL, &arg, 0, 0);
+		return TRUE;
+	}
 }
 
 static gboolean
@@ -743,6 +777,9 @@ loadstatuschange(WebKitWebView *view, GParamSpec *pspec, Client *c) {
 		break;
 	case WEBKIT_LOAD_COMMITTED:
 		uri = geturi(c);
+		if (strcmp(uri, "about:blank") != 0) {
+			origin_uri = uri;
+		}
 		if(strstr(uri, "https://") == uri) {
 			frame = webkit_web_view_get_main_frame(c->view);
 			src = webkit_web_frame_get_data_source(frame);
@@ -798,17 +835,21 @@ loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
 	if(strcmp(uri, "") == 0)
 		return;
 
-	setatom(c, AtomUri, uri);
+	if (!sameoriginpolicy || !origin_uri || !originhas(origin_uri) || originmatch(uri, origin_uri)) {
+		setatom(c, AtomUri, uri);
 
-	/* prevents endless loop */
-	if(strcmp(uri, geturi(c)) == 0) {
-		reload(c, &a);
+		/* prevents endless loop */
+		if(strcmp(uri, geturi(c)) == 0) {
+			reload(c, &a);
+		} else {
+			webkit_web_view_load_uri(c->view, uri);
+			c->progress = 0;
+			hasloaded = true;
+			c->title = copystr(&c->title, uri);
+			updatetitle(c);
+		}
 	} else {
-		webkit_web_view_load_uri(c->view, uri);
-		c->progress = 0;
-		hasloaded = true;
-		c->title = copystr(&c->title, uri);
-		updatetitle(c);
+		newwindow(NULL, arg, 0, explicitnavigation);
 	}
 }
 
@@ -1055,9 +1096,10 @@ newclient(void) {
 static void
 newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigation) {
 	guint i = 0;
-	const char *cmd[18], *uri;
+	const char *cmd[22], *uri;
 	const Arg a = { .v = (void *)cmd };
 	char tmp[64];
+	char *origin_packed = NULL;
 
 	cmd[i++] = argv0;
 	cmd[i++] = "-a";
@@ -1081,8 +1123,19 @@ newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigati
 		cmd[i++] = "-s";
 	if(showxid)
 		cmd[i++] = "-x";
+	if(sameoriginpolicy)
+		cmd[i++] = "-O";
 	if(enablediskcache)
 		cmd[i++] = "-D";
+	if(!explicitnavigation) {
+		cmd[i++] = "-R";
+		if (originhas(origin_uri)) {
+			origin_packed = origingeturi(origin_uri);
+		} else {
+			origin_packed = g_strdup("-");
+		}
+		cmd[i++] = origin_packed;
+	}
 	cmd[i++] = "-c";
 	cmd[i++] = cookiefile;
 	cmd[i++] = "--";
@@ -1091,6 +1144,7 @@ newwindow(Client *c, const Arg *arg, gboolean noembed, gboolean explicitnavigati
 		cmd[i++] = uri;
 	cmd[i++] = NULL;
 	spawn(NULL, &a);
+	g_free(origin_packed);
 	if (!hasvisual) {
 		if(dpy)
 			close(ConnectionNumber(dpy));
@@ -1145,6 +1199,118 @@ menuactivate(GtkMenuItem *item, Client *c) {
 		if(uri)
 			gtk_clipboard_set_text(prisel, uri, -1);
 	}
+}
+
+static int
+origincmp(const char *uri1, const char *uri2) {
+	/* Doesn't handle default ports, but otherwise should comply with RFC 6454, The Web Origin Concept. */
+	int c;
+	if        (g_str_has_prefix(uri1, "http://")  && g_str_has_prefix(uri2, "http://")) {
+		return strncmp(uri1 + strlen("http://"),  uri2 + strlen("http://"),  strcspn(uri1 + strlen("http://"),  "/?#"));
+	} else if (g_str_has_prefix(uri1, "https://") && g_str_has_prefix(uri2, "https://")) {
+		return strncmp(uri1 + strlen("https://"), uri2 + strlen("https://"), strcspn(uri1 + strlen("https://"), "/?#"));
+	} else {
+		c = strcmp(uri1, uri2);
+		if (c == 0) {
+			/* -1 when 0 to force a mismatch in originmatch() */
+			c = -1;
+		}
+		return c;
+	}
+}
+
+static int
+originhas(const char *uri) {
+	char *origin = origingethost(uri);
+	int has = origin != NULL;
+	free(origin);
+	return has;
+}
+
+static const char *
+origingetproto(const char *uri) {
+	if (g_str_has_prefix(uri, "http://")) {
+		return "http";
+	} else if (g_str_has_prefix(uri, "https://")) {
+		return "https";
+	} else {
+		return NULL;
+	}
+}
+
+/* caller must free() the return value, if not NULL */
+static char *
+origingethost(const char *uri) {
+	/* Doesn't handle default ports, but otherwise should comply with RFC 6454, The Web Origin Concept. */
+	char  *origin = NULL;
+	size_t spansize;
+	size_t spanstart;
+
+	if (       g_str_has_prefix(uri, "http://")) {
+		spanstart =       strlen("http://");
+	} else if (g_str_has_prefix(uri, "https://")) {
+		spanstart =       strlen("https://");
+	} else {
+		/* 
+		 * RFC 6454: this case should return a globally unique origin. 
+		 *
+		 * As long as processes are per-origin
+		 * (that is, new origins get a new process),
+		 * then relying only on process state provides this uniqueness,
+		 * since anything stored would be stored by an inaccessible key. 
+		 *
+		 * So, when the caller gets this error,
+		 * it should just bypass storage altogether.
+		 */
+		return NULL;
+	}
+
+	spansize = strcspn(uri + spanstart, "/?#");
+	if (spansize > 0 && uri[spanstart] == '.') {
+		/* kill attempt to traverse into parent folder */
+		return NULL;
+	}
+	origin = malloc(sizeof(char) * (spansize + 1));
+	if (origin) {
+		strncpy(origin, uri + spanstart, spansize);
+		origin[spansize] = '\0';
+		/* malloc()'d origin */
+		return origin;
+	} else {
+		/* ENOMEM set by malloc() */
+		return NULL;
+	}
+}
+
+/* caller must g_free() the return value, if not NULL */
+static char *
+origingeturi(const char *uri) {
+	const char *origin_proto = origingetproto(uri);
+	char *origin_host = origingethost(uri);
+	char *origin_packed = NULL;
+	if (origin_host) {
+		origin_packed = g_strdup_printf("%s://%s", origin_proto, origin_host);
+	}
+	g_free(origin_host);
+	return origin_packed;
+}
+
+/* caller must g_free() the return value, if not NULL */
+static char *
+origingetfolder(const char *uri) {
+	const char *origin_proto = origingetproto(uri);
+	char *origin_host = origingethost(uri);
+	char *origin_packed = NULL;
+	if (origin_host) {
+		origin_packed = g_strdup_printf("%s_%s", origin_proto, origin_host);
+	}
+	g_free(origin_host);
+	return origin_packed;
+}
+
+static int
+originmatch(const char *uri1, const char *uri2) {
+	return origincmp(uri1, uri2) == 0;
 }
 
 static void
@@ -1270,6 +1436,8 @@ setup(const char *qualified_uri) {
 	int i;
 	char *proxy;
 	char *new_proxy;
+	char *origin;
+	char *originpath;
 	SoupURI *puri;
 	SoupSession *s;
 	GError *error = NULL;
@@ -1286,10 +1454,29 @@ setup(const char *qualified_uri) {
 	atoms[AtomUri] = XInternAtom(dpy, "_SURF_URI", False);
 
 	/* dirs and files */
-	cookiefile = buildpath(cookiefile);
+	if (sameoriginpolicy && qualified_uri && originhas(qualified_uri)) {
+		origin = origingetfolder(qualified_uri);
+
+		originpath = g_strdup_printf(origincookiefile, origin);
+		cookiefile = buildpath(originpath);
+		g_free(originpath);
+
+		originpath = g_strdup_printf(origincachefolder, origin);
+		cachefolder = buildpath(originpath);
+		g_free(originpath);
+
+		originpath = g_strdup_printf(origindbfolder, origin);
+		dbfolder = buildpath(originpath);
+		g_free(originpath);
+
+		free(origin);
+	} else {
+		cookiefile = buildpath(cookiefile);
+		cachefolder = buildpath(cachefolder);
+		dbfolder = buildpath(dbfolder);
+	}
+
 	scriptfile = buildpath(scriptfile);
-	cachefolder = buildpath(cachefolder);
-	dbfolder = buildpath(dbfolder);
 	styledir = buildpath(styledir);
 	if(stylefile == NULL) {
 		for(i = 0; i < LENGTH(styles); i++) {
@@ -1607,6 +1794,8 @@ gettogglestat(Client *c){
 
 	togglestat[p++] = enablediskcache? 'D': 'd';
 
+	togglestat[p++] = sameoriginpolicy? 'O' : 'o';
+
 	g_object_get(G_OBJECT(settings), "auto-load-images", &value, NULL);
 	togglestat[p++] = value? 'I': 'i';
 
@@ -1639,6 +1828,14 @@ getpagestat(Client *c) {
 static void
 updatetitle(Client *c) {
 	char *t;
+	char *originstat;
+
+	if(originhas(origin_uri)) {
+		originstat = origingethost(origin_uri);
+	} else {
+		originstat = g_strdup("-");
+	}
+			
 
 	if(showindicators) {
 		gettogglestat(c);
@@ -1648,11 +1845,14 @@ updatetitle(Client *c) {
 			t = g_strdup_printf("%s:%s | %s", togglestat,
 					pagestat, c->linkhover);
 		} else if(c->progress != 100) {
-			t = g_strdup_printf("[%i%%] %s:%s | %s", c->progress,
+			t = g_strdup_printf("[%i%%] %s:%s | %s | %s", c->progress,
 					togglestat, pagestat,
+					originstat,
 					(c->title == NULL)? "" : c->title);
 		} else {
-			t = g_strdup_printf("%s:%s | %s", togglestat, pagestat,
+			t = g_strdup_printf(       "%s:%s | %s | %s", 
+					togglestat, pagestat,
+					originstat,
 					(c->title == NULL)? "" : c->title);
 		}
 
@@ -1662,6 +1862,8 @@ updatetitle(Client *c) {
 		gtk_window_set_title(GTK_WINDOW(c->win),
 				(c->title == NULL)? "" : c->title);
 	}
+
+	g_free(originstat);
 }
 
 static void
@@ -1706,6 +1908,7 @@ main(int argc, char *argv[]) {
 	Arg arg;
 	Client *c;
 	char *qualified_uri = NULL;
+	char *prompt = NULL;
 
 	memset(&arg, 0, sizeof(arg));
 
@@ -1768,6 +1971,12 @@ main(int argc, char *argv[]) {
 	case 'N':
 		enableinspector = 1;
 		break;
+	case 'o':
+		sameoriginpolicy = 0;
+		break;
+	case 'O':
+		sameoriginpolicy = 1;
+		break;
 	case 'p':
 		enableplugins = 0;
 		break;
@@ -1776,6 +1985,9 @@ main(int argc, char *argv[]) {
 		break;
 	case 'r':
 		scriptfile = EARGF(usage());
+		break;
+	case 'R':
+		referring_origin = EARGF(usage());
 		break;
 	case 's':
 		enablescripts = 0;
@@ -1809,9 +2021,21 @@ main(int argc, char *argv[]) {
 
 	setup(qualified_uri);
 	c = newclient();
+	updatewinid(c);
 	if(qualified_uri) {
-		arg.v = qualified_uri;
-		loaduri(clients, &arg, 0);
+		if (originhas(qualified_uri)) {
+			origin_uri = qualified_uri;
+		}
+		if (sameoriginpolicy && referring_origin && (strcmp(referring_origin, "-") == 0 || !originmatch(referring_origin, qualified_uri))) {
+			setatom(c, AtomUri, qualified_uri);
+			prompt = g_strdup_printf(PROMPT_ORIGIN, referring_origin);
+			arg = (Arg)SETPROP("_SURF_URI", "_SURF_GO", prompt);
+			spawn(c, &arg);
+			g_free(prompt);
+		} else {
+			arg.v = qualified_uri;
+			loaduri(clients, &arg, 0);
+		}
 	} else {
 		updatetitle(c);
 	}

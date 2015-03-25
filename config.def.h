@@ -4,6 +4,8 @@ static char *scriptfile     = "~/.surf/script.js";
 static char *styledir       = "~/.surf/styles/";
 static char *cachefolder    = "~/.surf/cache/";
 static char *dbfolder       = "~/.surf/databases/";
+static char *origincachefolder = "~/.surf/origins/%s/cache/";
+static char *origindbfolder = "~/.surf/origins/%s/databases/";
 
 static Bool kioskmode       = FALSE; /* Ignore shortcuts */
 static Bool showindicators  = TRUE;  /* Show indicators in window title */
@@ -15,6 +17,7 @@ static gfloat zoomlevel = 1.0;       /* Default zoom level */
 
 /* Soup default features */
 static char *cookiefile     = "~/.surf/cookies.txt";
+static char *origincookiefile = "~/.surf/origins/%s/cookies.txt";
 static char *cookiepolicies = "Aa@"; /* A: accept all; a: accept nothing,
                                         @: accept no third party */
 static char *cafile         = "/etc/ssl/certs/ca-certificates.crt";
@@ -33,10 +36,11 @@ static Bool enablestyles          = TRUE;
 static Bool loadimages            = TRUE;
 static Bool hidebackground        = FALSE;
 static Bool allowgeolocation      = TRUE;
-
+static Bool sameoriginpolicy      = TRUE;
 #define PROMPT_GO    "Go to"
 #define PROMPT_FIND  "Find"
 #define PROMPT_FIND2 "/"
+#define PROMPT_ORIGIN "Crossing from %s to"
 
 #define SETPROP(p, q, prompt) { \
 	.v = (char *[]){ "/bin/sh", "-c", \
