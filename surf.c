@@ -197,7 +197,7 @@ static void scroll_h(Client *c, const Arg *arg);
 static void scroll_v(Client *c, const Arg *arg);
 static void scroll(GtkAdjustment *a, const Arg *arg);
 static void setatom(Client *c, int a, const char *v);
-static void setup(void);
+static void setup(const char *uri_arg);
 static void sigchld(int unused);
 static void source(Client *c, const Arg *arg);
 static void spawn(Client *c, const Arg *arg);
@@ -216,6 +216,7 @@ static void togglestyle(Client *c, const Arg *arg);
 static void updatetitle(Client *c);
 static void updatewinid(Client *c);
 static void usage(void);
+char *qualify_uri(const char *uri);
 static void windowobjectcleared(GtkWidget *w, WebKitWebFrame *frame,
 		JSContextRef js, JSObjectRef win, Client *c);
 static void zoom(Client *c, const Arg *arg);
@@ -770,39 +771,45 @@ loadstatuschange(WebKitWebView *view, GParamSpec *pspec, Client *c) {
 	}
 }
 
-static void
-loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
-	char *u = NULL, *rp;
-	const char *uri = (char *)arg->v;
-	Arg a = { .b = FALSE };
+/* needs to be g_free()'d by caller */
+char *
+qualify_uri(const char *uri) {
+	char *qualified_uri = NULL, *rp;
 	struct stat st;
-
-	if(strcmp(uri, "") == 0)
-		return;
 
 	/* In case it's a file path. */
 	if(stat(uri, &st) == 0) {
 		rp = realpath(uri, NULL);
-		u = g_strdup_printf("file://%s", rp);
+		qualified_uri = g_strdup_printf("file://%s", rp);
 		free(rp);
 	} else {
-		u = g_strrstr(uri, "://") ? g_strdup(uri)
+		qualified_uri = g_strrstr(uri, "://") ? g_strdup(uri)
 			: g_strdup_printf("http://%s", uri);
 	}
+
+	return qualified_uri;
+}
+
+static void
+loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
+	const char *uri = (char *)arg->v;
+	Arg a = { .b = FALSE };
+
+	if(strcmp(uri, "") == 0)
+		return;
 
 	setatom(c, AtomUri, uri);
 
 	/* prevents endless loop */
-	if(strcmp(u, geturi(c)) == 0) {
+	if(strcmp(uri, geturi(c)) == 0) {
 		reload(c, &a);
 	} else {
-		webkit_web_view_load_uri(c->view, u);
+		webkit_web_view_load_uri(c->view, uri);
 		c->progress = 0;
 		hasloaded = true;
-		c->title = copystr(&c->title, u);
+		c->title = copystr(&c->title, uri);
 		updatetitle(c);
 	}
-	g_free(u);
 }
 
 static void
@@ -1142,9 +1149,11 @@ menuactivate(GtkMenuItem *item, Client *c) {
 
 static void
 pasteuri(GtkClipboard *clipboard, const char *text, gpointer d) {
-	Arg arg = {.v = text };
+	char *qualified_uri = qualify_uri(text);
+	Arg arg = {.v = qualified_uri };
 	if(text != NULL)
 		loaduri((Client *) d, &arg, 1);
+	g_free(qualified_uri);
 }
 
 static void
@@ -1157,6 +1166,8 @@ processx(GdkXEvent *e, GdkEvent *event, gpointer d) {
 	Client *c = (Client *)d;
 	XPropertyEvent *ev;
 	Arg arg;
+	const char *unqualified_uri = NULL;
+	char *qualified_uri = NULL;
 
 	if(((XEvent *)e)->type == PropertyNotify) {
 		ev = &((XEvent *)e)->xproperty;
@@ -1167,10 +1178,17 @@ processx(GdkXEvent *e, GdkEvent *event, gpointer d) {
 
 				return GDK_FILTER_REMOVE;
 			} else if(ev->atom == atoms[AtomGo]) {
-				arg.v = getatom(c, AtomGo);
-				loaduri(c, &arg, 1);
-
-				return GDK_FILTER_REMOVE;
+				unqualified_uri = getatom(c, AtomGo);
+				if (unqualified_uri) {
+					qualified_uri = qualify_uri(unqualified_uri);
+					if (qualified_uri) {
+						arg.v = qualified_uri;
+						loaduri(c, &arg, 1);
+						g_free(qualified_uri);
+	
+						return GDK_FILTER_REMOVE;
+					}
+				}
 			}
 		}
 	}
@@ -1248,7 +1266,7 @@ setatom(Client *c, int a, const char *v) {
 }
 
 static void
-setup(void) {
+setup(const char *qualified_uri) {
 	int i;
 	char *proxy;
 	char *new_proxy;
@@ -1687,6 +1705,7 @@ int
 main(int argc, char *argv[]) {
 	Arg arg;
 	Client *c;
+	char *qualified_uri = NULL;
 
 	memset(&arg, 0, sizeof(arg));
 
@@ -1782,12 +1801,16 @@ main(int argc, char *argv[]) {
 	default:
 		usage();
 	} ARGEND;
-	if(argc > 0)
-		arg.v = argv[0];
+	if(argc > 0) {
+		if (argv[0]) {
+			qualified_uri = qualify_uri(argv[0]);
+		}
+	}
 
-	setup();
+	setup(qualified_uri);
 	c = newclient();
-	if(arg.v) {
+	if(qualified_uri) {
+		arg.v = qualified_uri;
 		loaduri(clients, &arg, 0);
 	} else {
 		updatetitle(c);
@@ -1795,6 +1818,8 @@ main(int argc, char *argv[]) {
 
 	gtk_main();
 	cleanup();
+
+	g_free(qualified_uri);
 
 	return EXIT_SUCCESS;
 }
