@@ -21,7 +21,7 @@ static char *origincookiefile = "~/.surf/origins/%s/cookies.txt";
 static char *cookiepolicies = "Aa@"; /* A: accept all; a: accept nothing,
                                         @: accept no third party */
 static char *cafile         = "/etc/ssl/certs/ca-certificates.crt";
-static char *strictssl      = FALSE; /* Refuse untrusted SSL connections */
+static Bool strictssl       = FALSE; /* Refuse untrusted SSL connections */
 static time_t sessiontime   = 3600;
 
 /* Webkit default features */
