@@ -101,7 +101,7 @@ static char *referring_origin = NULL;
 static gboolean hasloaded = false;
 static gboolean hasvisual = false;
 
-static void acceptlanguagescramble();
+static void acceptlanguagescramble(WebKitWebView *view);
 static void addaccelgroup(Client *c);
 static void beforerequest(WebKitWebView *w, WebKitWebResource *r,
 		WebKitURIRequest *req, Client *c);
@@ -376,7 +376,7 @@ decidepolicy(WebKitWebView *v, WebKitPolicyDecision *d,
 		if (!useragent) {
 			useragentscramble(v);
 		}
-		acceptlanguagescramble();
+		acceptlanguagescramble(v);
 		if ((handled = decidewindow(FALSE, d, c)))
 			webkit_policy_decision_ignore(d);
 		break;
@@ -1208,7 +1208,7 @@ show(WebKitWebView *view, Client *c) {
 	if (!useragent) {
 		useragentscramble(c->view);
 	}
-	acceptlanguagescramble();
+	acceptlanguagescramble(c->view);
 
 	settings = webkit_web_view_get_settings(c->view);
 	webkit_settings_set_enable_html5_database(settings, FALSE);
@@ -1370,7 +1370,7 @@ acceptlanguagescramble(WebKitWebView *view) {
 	char *randlang2 = strlangentropy();
 	char *acceptlanguage;
 
-	if (strlen(lang) >= 5) {
+	if (lang != NULL && strlen(lang) >= 5) {
 		acceptlanguage = g_strdup_printf("%5.5s, %s;q=0.9, %s;q=0.8", lang, randlang1, randlang2);
 		/* TODO configure the browser */
 	}
@@ -1727,7 +1727,6 @@ main(int argc, char *argv[]) {
 
 	setup(qualified_uri);
 	c = newclient();
-	updatewinid(c);
 	if(qualified_uri) {
 		if (originhas(qualified_uri)) {
 			origin_uri = qualified_uri;
@@ -1741,6 +1740,7 @@ main(int argc, char *argv[]) {
 		} else {
 			arg.v = qualified_uri;
 			show(NULL, c);
+			updatewinid(c);
 			loaduri(clients, &arg, 0);
 		}
 	} else {
