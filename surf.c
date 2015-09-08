@@ -98,7 +98,6 @@ static int policysel = 0;
 static char *stylefile = NULL;
 static char *origin_uri = NULL;
 static char *referring_origin = NULL;
-static SoupCache *diskcache = NULL;
 static gboolean hasloaded = false;
 static gboolean hasvisual = false;
 
@@ -113,7 +112,6 @@ static WebKitCookieAcceptPolicy cookiepolicy_get(void);
 static char cookiepolicy_set(const WebKitCookieAcceptPolicy p);
 static char *copystr(char **str, const char *src);
 static WebKitWebView *createwindow(WebKitWebView *v, Client *c);
-		Client *c);
 static gboolean decidenavigation(WebKitPolicyDecision *d, Client *c);
 static gboolean decidedownload(WebKitPolicyDecision *d, Client *c);
 static gboolean decidepolicy(WebKitWebView *v, WebKitPolicyDecision *d,
@@ -271,10 +269,6 @@ buildpath(const char *path) {
 
 static void
 cleanup(void) {
-	if(diskcache) {
-		soup_cache_flush(diskcache);
-		soup_cache_dump(diskcache);
-	}
 	while(clients)
 		destroyclient(clients);
 	g_free(cookiefile);
@@ -372,6 +366,7 @@ createwindow(WebKitWebView  *v, Client *c) {
 	return n->view;
 }
 
+static gboolean
 decidepolicy(WebKitWebView *v, WebKitPolicyDecision *d,
 		WebKitPolicyDecisionType t, Client *c) {
 	gboolean handled;
@@ -401,9 +396,9 @@ decidepolicy(WebKitWebView *v, WebKitPolicyDecision *d,
 
 static gboolean
 decidenavigation(WebKitPolicyDecision *d, Client *c) {
-	Arg arg;
 	WebKitNavigationPolicyDecision *n = WEBKIT_NAVIGATION_POLICY_DECISION(d);
-	WebKitURIRequest *u = webkit_navigation_policy_decision_get_request(n);
+	WebKitNavigationAction *a = webkit_navigation_policy_decision_get_navigation_action(n);
+	WebKitURIRequest *u = webkit_navigation_action_get_request(a);
 	const char *uri = webkit_uri_request_get_uri(u);
 	const char *view_uri = webkit_web_view_get_uri(c->view);
 	int is_view_uri = strcmp(uri, view_uri) == 0;
@@ -675,13 +670,11 @@ loadchanged(WebKitWebView *view, WebKitLoadEvent event, Client *c) {
 	char *uri;
 
 	switch(event) {
-	case WEBKIT_LOAD_FIRST_VISUALLY_NON_EMPTY_LAYOUT:
-		hasvisual = true;
-		break;
 	case WEBKIT_LOAD_STARTED:
 		c->sslfailed = FALSE;
 		break;
 	case WEBKIT_LOAD_COMMITTED:
+		hasvisual = true;
 		uri = geturi(c);
 		if (strcmp(uri, "about:blank") != 0) {
 			origin_uri = uri;
@@ -698,11 +691,6 @@ loadchanged(WebKitWebView *view, WebKitLoadEvent event, Client *c) {
 	case WEBKIT_LOAD_FINISHED:
 		c->progress = 100;
 		updatetitle(c);
-/*	CHECK */
-		if(diskcache) {
-			soup_cache_flush(diskcache);
-			soup_cache_dump(diskcache);
-		}
 		break;
 	default:
 		break;
@@ -740,7 +728,7 @@ loaduri(Client *c, const Arg *arg, gboolean explicitnavigation) {
 		setatom(c, AtomUri, uri);
 
 		if(enablestyles)
-			setstyle(c, getstyle(u));
+			setstyle(c, getstyle(uri));
 
 		/* prevents endless loop */
 		if(strcmp(uri, geturi(c)) == 0) {
@@ -816,9 +804,6 @@ newclient(void) {
 	g_signal_connect(G_OBJECT(c->view),
 			"create",
 			G_CALLBACK(createwindow), c);
-	g_signal_connect(G_OBJECT(c->view),
-			"navigation-policy-decision-requested",
-			G_CALLBACK(decidenavigation), c);
 	g_signal_connect(G_OBJECT(c->view),
 			"load-changed",
 			G_CALLBACK(loadchanged), c);
@@ -1228,8 +1213,8 @@ show(WebKitWebView *view, Client *c) {
 	settings = webkit_web_view_get_settings(c->view);
 	webkit_settings_set_enable_html5_database(settings, FALSE);
 	webkit_settings_set_enable_html5_local_storage(settings, FALSE);
-	webkit_settings_get_enable_offline_web_application_cache(settings, FALSE);
-	webkit_settings_get_enable_dns_prefetching(settings, FALSE);
+	webkit_settings_set_enable_offline_web_application_cache(settings, FALSE);
+	webkit_settings_set_enable_dns_prefetching(settings, FALSE);
 	if(!(ua = getenv("SURF_USERAGENT")))
 		ua = useragent;
 	webkit_settings_set_user_agent(settings, ua);
@@ -1378,8 +1363,8 @@ strlangentropy() {
 }
 
 static void
-acceptlanguagescramble() {
-	SoupSession *s = webkit_get_default_session();
+acceptlanguagescramble(WebKitWebView *view) {
+	WebKitSettings *settings = webkit_web_view_get_settings(view);
 	char *lang = getenv("LANG");
 	char *randlang1 = strlangentropy();
 	char *randlang2 = strlangentropy();
@@ -1387,7 +1372,7 @@ acceptlanguagescramble() {
 
 	if (strlen(lang) >= 5) {
 		acceptlanguage = g_strdup_printf("%5.5s, %s;q=0.9, %s;q=0.8", lang, randlang1, randlang2);
-		g_object_set(G_OBJECT(s), "accept-language", acceptlanguage, NULL);
+		/* TODO configure the browser */
 	}
 	g_free(randlang1);
 	g_free(randlang2);
@@ -1395,11 +1380,11 @@ acceptlanguagescramble() {
 
 static void
 useragentscramble(WebKitWebView *view) {
-	WebKitWebSettings *settings = webkit_web_view_get_settings(view);
+	WebKitSettings *settings = webkit_web_view_get_settings(view);
 	gchar *ua = strentropy();
 	if (!ua) 
 		ua = " "; /* fallback to blank user-agent -- NULL or "" return a webkit default string that leaks information */
-	g_object_set(G_OBJECT(settings), "user-agent", ua, NULL);
+	webkit_settings_set_user_agent(settings, ua);
 	g_free(ua);
 }
 
