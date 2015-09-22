@@ -1638,7 +1638,7 @@ acceptlanguagescramble() {
 	char *randlang2 = strlangentropy();
 	char *acceptlanguage;
 
-	if (strlen(lang) >= 5) {
+	if (lang != NULL && strlen(lang) >= 5) {
 		acceptlanguage = g_strdup_printf("%5.5s, %s;q=0.9, %s;q=0.8", lang, randlang1, randlang2);
 		g_object_set(G_OBJECT(s), "accept-language", acceptlanguage, NULL);
 	}
